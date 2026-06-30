@@ -76,24 +76,36 @@ APPS = [
 
 # Boards without NFC / IR hardware – exclude the corresponding apps
 _board = os.environ.get("FLIPPER_BOARD", "")
+# Cardputer (standard + ADV) carry BOARD_HAS_NFC=1 (external WS1850S/PN532 on the
+# Grove port) and BOARD_HAS_IR=1, so they are NOT in these sets.
 _boards_without_nfc = {"waveshare_c6_1.9", "waveshare_c6_1.47"}
 _boards_without_ir = {"waveshare_c6_1.9", "waveshare_c6_1.47"}
+# Neither Cardputer has an RDM6300/RFID front-end (BOARD_HAS_RFID=0).
+_boards_without_lfrfid = {"m5stack_cardputer", "m5stack_cardputer_adv"}
 
 # Wolf3D shares Doom's requirements (PSRAM, ST7789 320xN, I2S speaker).
 # Doom läuft ebenfalls nur auf T-Embed (PSRAM + 16 MB Flash) — wird aber als
 # externer FAP gebaut (steht nicht in APPS), Block bleibt unten zur Klarheit.
-_boards_without_wolf3d = {"waveshare_c6_1.9", "waveshare_c6_1.47"}
+# Cardputer (standard) has no PSRAM; Cardputer-ADV builds with SPIRAM disabled.
+_boards_without_wolf3d = {"waveshare_c6_1.9", "waveshare_c6_1.47",
+                          "m5stack_cardputer", "m5stack_cardputer_adv"}
 
 if _board in _boards_without_nfc:
     APPS = [a for a in APPS if a != "nfc"]
 
+if _board in _boards_without_lfrfid:
+    APPS = [a for a in APPS if a != "lfrfid"]
+
 # waveshare_c6_1.9: external CC1101 module wired up (pins in board_waveshare_c6_1.9.h,
 # BOARD_HAS_SUBGHZ=1) → SubGHz built in. 1.47 has no module → stays excluded.
-_boards_without_subghz = {"waveshare_c6_1.47"}
+# m5stack_cardputer (standard) has no CC1101 (BOARD_HAS_SUBGHZ=0) → excluded.
+# m5stack_cardputer_adv ships SubGHz (BOARD_HAS_SUBGHZ=1) → NOT excluded.
+_boards_without_subghz = {"waveshare_c6_1.47", "m5stack_cardputer"}
 
 # NRF24 plugs into the LORA slot (T-Embed CC1101). Boards without the slot
-# don't have the required pin defines.
-_boards_without_nrf24 = {"waveshare_c6_1.9", "waveshare_c6_1.47"}
+# don't have the required pin defines. Standard Cardputer has none
+# (BOARD_HAS_NRF24=0); Cardputer-ADV does (BOARD_HAS_NRF24=1) → NOT excluded.
+_boards_without_nrf24 = {"waveshare_c6_1.9", "waveshare_c6_1.47", "m5stack_cardputer"}
 
 if _board in _boards_without_ir:
     APPS = [a for a in APPS if a not in ("infrared", "js_infrared")]

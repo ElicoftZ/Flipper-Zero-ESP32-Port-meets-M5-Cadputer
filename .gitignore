@@ -8,6 +8,8 @@ __pycache__/
 sdkconfig.old
 .DS_Store
 build_waveshare_c6/
+build_cardputer/
+build_cardputer_adv/
 .vscode/settings.json
 
 # Local-dev tooling (not for upstream)

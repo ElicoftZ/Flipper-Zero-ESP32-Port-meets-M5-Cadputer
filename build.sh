@@ -16,22 +16,28 @@ declare -A TARGETS=(
     ["esp32s3"]="esp32s3"
     ["waveshare_c6"]="esp32c6"
     ["t_embed"]="esp32s3"
+    ["cardputer"]="esp32s3"
+    ["cardputer_adv"]="esp32s3"
 )
 declare -A NAMES=(
     ["esp32s3"]="esp32s3_generic"
     ["waveshare_c6"]="waveshare_c6_1.9"
     ["t_embed"]="lilygo_t_embed_cc1101"
+    ["cardputer"]="m5stack_cardputer"
+    ["cardputer_adv"]="m5stack_cardputer_adv"
 )
 declare -A DIRS=(
     ["esp32s3"]="build_s3"
     ["waveshare_c6"]="build_waveshare_c6"
     ["t_embed"]="build_t_embed"
+    ["cardputer"]="build_cardputer"
+    ["cardputer_adv"]="build_cardputer_adv"
 )
 
 usage() {
     cat <<EOF
 Usage: $(basename "$0") --board <name> [options]
-Boards: esp32s3, waveshare_c6, t_embed
+Boards: esp32s3, waveshare_c6, t_embed, cardputer, cardputer_adv
 Options: -p|--port, -m|--monitor, --build-only
 EOF
 }
@@ -74,13 +80,22 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "${SELECTED_BOARD}" || -z "${NAMES[$SELECTED_BOARD]+x}" ]]; then
-    echo "Error: Valid --board required (esp32s3, waveshare_c6, t_embed)." >&2
+    echo "Error: Valid --board required (esp32s3, waveshare_c6, t_embed, cardputer, cardputer_adv)." >&2
     exit 1
 fi
 
 BOARD="${NAMES[$SELECTED_BOARD]}"
 BUILD_DIR="${DIRS[$SELECTED_BOARD]}"
 TARGET="${TARGETS[$SELECTED_BOARD]}"
+
+# Per-board sdkconfig overrides. ESP-IDF auto-applies sdkconfig.defaults.<target>
+# (e.g. sdkconfig.defaults.esp32s3 -> PSRAM on, 16 MB flash). A board such as the
+# Cardputer has no PSRAM / 8 MB flash and ships sdkconfig.defaults.<flipper_board>
+# which must be applied LAST to override the target defaults. Skip if absent.
+SDKCONFIG_DEFAULTS="sdkconfig.defaults"
+if [[ -f "sdkconfig.defaults.${BOARD}" ]]; then
+    SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.${BOARD}"
+fi
 
 # Force environment to match board target
 export IDF_TARGET="${TARGET}"
@@ -117,11 +132,11 @@ if [[ -f "${BUILD_DIR}/sdkconfig" ]]; then
 fi
 
 # Set target (creates/updates sdkconfig)
-idf.py -B "${BUILD_DIR}" set-target "${TARGET}"
+idf.py -B "${BUILD_DIR}" -DSDKCONFIG_DEFAULTS="${SDKCONFIG_DEFAULTS}" set-target "${TARGET}"
 
 # Construct command
 COMMANDS=("reconfigure" "build")
-PY_OPTS=("-B" "${BUILD_DIR}" "-DFLIPPER_BOARD=${BOARD}")
+PY_OPTS=("-B" "${BUILD_DIR}" "-DFLIPPER_BOARD=${BOARD}" "-DSDKCONFIG_DEFAULTS=${SDKCONFIG_DEFAULTS}")
 
 if [[ "${BUILD_ONLY}" -eq 0 ]]; then
     COMMANDS+=("flash")

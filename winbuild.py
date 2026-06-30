@@ -40,6 +40,8 @@ BOARDS = {
     "t_embed":      ("lilygo_t_embed_cc1101", "esp32s3", "build_t_embed"),
     "esp32s3":      ("esp32s3_generic",       "esp32s3", "build_s3"),
     "waveshare_c6": ("waveshare_c6_1.9",      "esp32c6", "build_waveshare_c6"),
+    "cardputer":    ("m5stack_cardputer",     "esp32s3", "build_cardputer"),
+    "cardputer_adv":("m5stack_cardputer_adv", "esp32s3", "build_cardputer_adv"),
 }
 
 REPO_ROOT = Path(__file__).resolve().parent
@@ -89,9 +91,26 @@ def cmd_check(args):
     return run_with_idf_env(get_esp_idf_dir(), "--version")
 
 
+def _sdkconfig_defaults_arg(flipper_board: str) -> str:
+    """Build the -DSDKCONFIG_DEFAULTS argument for a board.
+
+    ESP-IDF always loads `sdkconfig.defaults` plus the auto target variant
+    `sdkconfig.defaults.<target>` (e.g. sdkconfig.defaults.esp32s3, which turns
+    PSRAM on and sets 16 MB flash for T-Embed/generic S3). A board like the
+    Cardputer has NO PSRAM and 8 MB flash, so it ships its own
+    `sdkconfig.defaults.<flipper_board>` that must be applied LAST to override
+    those. Without this the no-PSRAM Cardputer is configured for octal PSRAM
+    and fails to boot. Boards with no per-board file keep the default behavior.
+    """
+    board_defaults = REPO_ROOT / f"sdkconfig.defaults.{flipper_board}"
+    if board_defaults.exists():
+        return f'-DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.{flipper_board}"'
+    return ""
+
+
 def cmd_build(args):
     flipper_board, target, build_dir = BOARDS[args.board]
-    common = f"-B {build_dir} -DFLIPPER_BOARD={flipper_board}"
+    common = f"-B {build_dir} -DFLIPPER_BOARD={flipper_board} {_sdkconfig_defaults_arg(flipper_board)}".rstrip()
     esp_idf_dir = get_esp_idf_dir()
     # FLIPPER_BOARD must also be in the env: fam_config.py reads it via
     # os.environ to filter board-incompatible apps (e.g. NFC/IR on Waveshare C6).
@@ -105,9 +124,10 @@ def cmd_build(args):
 def cmd_flash(args):
     flipper_board, _, build_dir = BOARDS[args.board]
     port = get_port(args.port)
+    sdkconfig = _sdkconfig_defaults_arg(flipper_board)
     return run_with_idf_env(
         get_esp_idf_dir(),
-        f"-B {build_dir} -DFLIPPER_BOARD={flipper_board} -p {port} flash",
+        f"-B {build_dir} -DFLIPPER_BOARD={flipper_board} {sdkconfig} -p {port} flash".replace("  ", " "),
         {"FLIPPER_BOARD": flipper_board})
 
 
@@ -224,7 +244,7 @@ def cmd_cross_build(args):
 
         _purge_stale_sdkconfig(target, build_dir)
 
-        common = f"-B {build_dir} -DFLIPPER_BOARD={flipper_board}"
+        common = f"-B {build_dir} -DFLIPPER_BOARD={flipper_board} {_sdkconfig_defaults_arg(flipper_board)}".rstrip()
         extra = {"FLIPPER_BOARD": flipper_board}
 
         rc = run_with_idf_env(esp_idf_dir, f"{common} set-target {target}", extra)
