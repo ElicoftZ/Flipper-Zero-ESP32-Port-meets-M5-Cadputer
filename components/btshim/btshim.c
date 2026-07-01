@@ -32,7 +32,12 @@
 #define BT_RX_EVENT_STOP      (1UL << 1)
 #define BT_RX_EVENT_ALL       (BT_RX_EVENT_DATA | BT_RX_EVENT_STOP)
 
-#define BT_RX_STREAM_SIZE     (8192)
+/* Intermediate RX buffer between the BLE GATTS callback and the RPC feeder
+ * thread. BLE serial delivers ~155-byte packets and the feeder drains fast, so
+ * 8 KB was hugely oversized for a no-PSRAM board where every KB counts at the
+ * moment the phone connects (BT stack + connection leave only a few KB free,
+ * and rpc_session_open then needs its own ~6 KB). 2 KB (~13 packets) is plenty. */
+#define BT_RX_STREAM_SIZE     (2048)
 
 /* Use ESP_LOG for BLE/RPC debug since FURI_LOG may not work in BTC task context */
 #define BT_LOG_I(fmt, ...) ESP_LOGI("BtSrv", fmt, ##__VA_ARGS__)
@@ -325,6 +330,20 @@ static void bt_open_rpc_connection(Bt* bt) {
         bool is_serial = furi_hal_bt_check_profile_type(bt->current_profile, ble_profile_serial);
         BT_LOG_I("Profile is_serial=%d", is_serial);
         if(is_serial) {
+            /* Opening the RPC session allocates ~6 KB (stream buffer + PB_Main)
+             * and the RX feeder thread another 2 KB. On this no-PSRAM board the
+             * BLE stack + an active connection can leave less than that free, in
+             * which case those allocations abort (furi_check / xTaskCreate) and
+             * reboot the device. Guard: if the heap is too low, leave the link
+             * connected but skip RPC setup instead of crashing. The phone shows
+             * connected-but-idle rather than taking the whole device down. */
+            size_t freeh = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+            if(freeh < 12 * 1024) {
+                BT_LOG_E(
+                    "Low RAM (%u free): skipping RPC-over-BLE to avoid OOM crash",
+                    (unsigned)freeh);
+                return;
+            }
             bt->rpc_session = rpc_session_open(bt->rpc, RpcOwnerBle);
             if(bt->rpc_session) {
                 BT_LOG_I("RPC session opened OK");
@@ -332,10 +351,14 @@ static void bt_open_rpc_connection(Bt* bt) {
                 rpc_session_set_buffer_is_empty_callback(
                     bt->rpc_session, bt_serial_buffer_is_empty_callback);
                 rpc_session_set_context(bt->rpc_session, bt);
-                /* Start RX feeder thread */
+                /* Start RX feeder thread. 2 KB stack is enough: it only waits on
+                 * a flag, drains the RX stream buffer, and calls rpc_session_feed
+                 * (a shallow stream_buffer_send -- protobuf decode runs on the
+                 * separate RPC thread). Allocated here at connect time when the
+                 * heap is tightest, so keep it small. */
                 furi_stream_buffer_reset(bt->rx_stream);
                 bt->rx_thread = furi_thread_alloc_ex(
-                    "BtRxFeeder", 4096, bt_rx_feeder_thread, bt);
+                    "BtRxFeeder", 2048, bt_rx_feeder_thread, bt);
                 furi_thread_start(bt->rx_thread);
                 ble_profile_serial_set_event_callback(
                     bt->current_profile, BT_RX_STREAM_SIZE, bt_serial_event_callback, bt);

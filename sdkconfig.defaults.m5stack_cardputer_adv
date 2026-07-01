@@ -101,6 +101,14 @@ CONFIG_BT_BTU_TASK_STACK_SIZE=3072
 CONFIG_BT_BTC_TASK_STACK_SIZE=3072
 # Disable BLE mesh (not used) — prevents mesh task/buffer allocation.
 # CONFIG_BT_MESH is not set
+# --- BLE memory footprint (no-PSRAM: shrink to what we actually use) ---
+# Single-peripheral device: one phone connection + advertising, at most a scan
+# for BLE Walk. IDF defaults reserve for 6 controller activities and 4 host ACL
+# connections; those buffers are the "BLE_INIT: Malloc failed" that aborts stack
+# bringup on the tight heap (GATTS_CreateService / BTU_StartUp OOM). Cut to need.
+CONFIG_BT_CTRL_BLE_MAX_ACT=3
+CONFIG_BT_CTRL_BLE_MAX_ACT_EFF=3
+CONFIG_BT_ACL_CONNECTIONS=2
 
 # =============================================================================
 # Newlib / C Runtime Configuration
