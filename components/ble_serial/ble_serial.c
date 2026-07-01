@@ -1138,6 +1138,13 @@ void ble_serial_free(BleSerial* serial) {
 }
 
 void ble_serial_reset_initialized(void) {
+    /* The global mutex is created lazily in ble_serial_init(). If the stack was
+     * never brought up (mutex still NULL), there is nothing to reset and taking
+     * the NULL mutex would assert in xQueueSemaphoreTake — just clear the flag. */
+    if(!serial_state.mutex) {
+        serial_state.initialized = false;
+        return;
+    }
     serial_lock_global();
     serial_state.initialized = false;
     serial_unlock_global();

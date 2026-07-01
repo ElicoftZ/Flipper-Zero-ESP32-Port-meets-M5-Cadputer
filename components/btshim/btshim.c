@@ -141,10 +141,19 @@ static void bt_storage_callback(const void* message, void* context) {
 /* ---- Allocation ---- */
 
 static Bt* bt_alloc(void) {
-    Bt* bt = malloc(sizeof(Bt));
+    /* calloc, not malloc: several fields (beacon_active, rpc_session, status_cb,
+     * suppress_pin_screen, ...) are otherwise read before being written. */
+    Bt* bt = calloc(1, sizeof(Bt));
 
     bt->max_packet_size = BT_DEFAULT_MTU;
     bt->current_profile = NULL;
+
+    /* Must be explicit: BtStatusOff is 1, not 0, so a zeroed struct still reads
+     * as BtStatusUnavailable. Without this the "already off" guard in
+     * bt_handle_stop_stack never trips, and launching an app that calls
+     * bt_stop_stack (e.g. BLE Spam) tears down a stack that was never started —
+     * ble_serial_reset_initialized() then locks a NULL global mutex and aborts. */
+    bt->status = BtStatusOff;
 
     /* Keys storage (stub on ESP32) */
     bt->keys_storage = bt_keys_storage_alloc(BT_KEYS_STORAGE_PATH);

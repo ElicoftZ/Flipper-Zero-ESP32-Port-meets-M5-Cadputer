@@ -6,9 +6,14 @@
 #include <esp_gattc_api.h>
 #include <esp_gatt_common_api.h>
 #include <esp_log.h>
+#include <esp_heap_caps.h>
 #include <furi.h>
 #include <btshim.h>
 #include <string.h>
+
+/* See ble_spam_hal.c: bringing up Bluedroid needs ~64 KB internal RAM or it
+ * asserts mid-init and crashes the device. Fail gracefully below this. */
+#define BLE_WALK_MIN_FREE_INTERNAL (72 * 1024)
 
 #define TAG "BleWalkHal"
 #define WALK_GATTC_APP_ID 0
@@ -237,6 +242,16 @@ bool ble_walk_hal_start(void) {
     bt_stop_stack(bt);
     furi_record_close(RECORD_BT);
     furi_delay_ms(100);
+
+    size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    if(free_internal < BLE_WALK_MIN_FREE_INTERNAL) {
+        ESP_LOGE(
+            TAG,
+            "Not enough RAM for BLE walk: %zu free, need >= %u",
+            free_internal,
+            (unsigned)BLE_WALK_MIN_FREE_INTERNAL);
+        return false;
+    }
 
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
     esp_err_t err = esp_bt_controller_init(&bt_cfg);

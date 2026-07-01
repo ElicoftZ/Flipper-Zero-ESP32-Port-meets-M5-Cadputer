@@ -4,10 +4,20 @@
 #include <esp_bt_main.h>
 #include <esp_gap_ble_api.h>
 #include <esp_log.h>
+#include <esp_heap_caps.h>
 #include <furi.h>
 #include <furi_hal_random.h>
 #include <btshim.h>
 #include <string.h>
+
+/* Minimum free internal heap required to bring up the BLE controller +
+ * Bluedroid host for spam. Below this, esp_bluedroid_enable()'s internal
+ * BTU_StartUp runs out of RAM and asserts (vQueueDelete on a NULL queue in the
+ * failed-init rollback) instead of returning an error -- crashing the whole
+ * device. On this no-PSRAM board (~200 KB total) the app + BLE UUID database
+ * already consume most of the heap, so we check up front and fail gracefully
+ * (the caller backs out to the menu) rather than reboot-looping. */
+#define BLE_SPAM_MIN_FREE_INTERNAL (72 * 1024)
 
 #define TAG "BleSpamHal"
 
@@ -59,6 +69,20 @@ bool ble_spam_hal_start(void) {
     bt_stop_stack(bt);
     furi_record_close(RECORD_BT);
     furi_delay_ms(100);
+
+    // Memory gate: bringing up Bluedroid needs ~64 KB internal RAM. If it fails
+    // mid-init it asserts inside ESP-IDF instead of returning an error, taking
+    // the whole device down. Check now (after freeing the serial stack) and bail
+    // cleanly if there isn't enough -- the caller returns to the menu.
+    size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    if(free_internal < BLE_SPAM_MIN_FREE_INTERNAL) {
+        ESP_LOGE(
+            TAG,
+            "Not enough RAM for BLE spam: %zu free, need >= %u",
+            free_internal,
+            (unsigned)BLE_SPAM_MIN_FREE_INTERNAL);
+        return false;
+    }
 
     // Init BLE controller
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
