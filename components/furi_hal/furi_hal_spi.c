@@ -247,6 +247,18 @@ void furi_hal_spi_acquire(const FuriHalSpiBusHandle* handle) {
     if(!bus->bitbang) {
         furi_hal_spi_bus_lock();
     }
+#elif defined(BOARD_SUBGHZ_SPI_HOST)
+    /* Cardputer-ADV: CC1101/NRF24 share physical SPI3 with the SD card
+     * (BOARD_SUBGHZ_SPI_HOST == BOARD_SD_SPI_HOST). furi_hal_sd.c takes this
+     * same global lock around every SD transaction; without also taking it
+     * here, a CC1101 strobe+status-read sequence can get time-sliced against
+     * an SD multi-block transfer on another task -- ESP-IDF only serializes
+     * individual SPI transactions, not multi-transaction protocol sequences.
+     * Scoped to the subghz bus specifically: the LCD is on its own SPI2 host
+     * and doesn't need to serialize against SPI3 traffic. */
+    if(!bus->bitbang && bus == &furi_hal_spi_bus_subghz) {
+        furi_hal_spi_bus_lock();
+    }
 #endif
     furi_check(furi_mutex_acquire(furi_hal_spi_get_mutex(bus), FuriWaitForever) == FuriStatusOk);
     furi_hal_power_insomnia_enter();
@@ -263,6 +275,10 @@ void furi_hal_spi_release(const FuriHalSpiBusHandle* handle) {
     furi_check(furi_mutex_release(furi_hal_spi_get_mutex(bus)) == FuriStatusOk);
 #if BOARD_CC1101_SPI_SHARED
     if(!bus->bitbang) {
+        furi_hal_spi_bus_unlock();
+    }
+#elif defined(BOARD_SUBGHZ_SPI_HOST)
+    if(!bus->bitbang && bus == &furi_hal_spi_bus_subghz) {
         furi_hal_spi_bus_unlock();
     }
 #endif

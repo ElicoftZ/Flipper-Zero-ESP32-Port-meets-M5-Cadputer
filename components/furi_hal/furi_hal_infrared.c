@@ -212,7 +212,10 @@ void furi_hal_infrared_async_rx_start(void) {
 }
 
 void furi_hal_infrared_async_rx_stop(void) {
-    furi_check(ir_state == InfraredStateAsyncRx);
+    if(ir_state != InfraredStateAsyncRx) {
+        FURI_LOG_W("IR", "async_rx_stop called but RX was not running");
+        return;
+    }
 
     ir_state = InfraredStateIdle;
 

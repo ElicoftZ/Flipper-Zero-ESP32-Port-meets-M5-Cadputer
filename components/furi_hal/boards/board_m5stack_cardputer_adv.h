@@ -2,11 +2,11 @@
  * @file board_m5stack_cardputer_adv.h
  * Board definition: M5Stack Cardputer-ADV (TCA8418 I2C keyboard)
  *
- * MCU:      ESP32-S3FN8 (dual-core Xtensa LX7, 8 MB Flash, 8 MB PSRAM)
+ * MCU:      ESP32-S3FN8 (dual-core Xtensa LX7, 8 MB Flash, NO PSRAM)
  * Display:  ST7789V2 240×135 RGB565 via SPI2
  * Input:    TCA8418 I2C Keyboard Controller (SDA=8, SCL=9, INT=11)
  * SD Card:  SPI3 (separate bus from LCD — MOSI=14, MISO=39, SCLK=40, CS=12)
- * IR:       TX (GPIO44), no RX
+ * IR:       TX (GPIO44) + RX (GPIO1)
  * Audio:    ES8311 codec (I2S + I2C)
  * Motion:   BMI270 IMU (I2C)
  */
