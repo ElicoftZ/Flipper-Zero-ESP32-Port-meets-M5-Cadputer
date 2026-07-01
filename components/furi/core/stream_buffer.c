@@ -30,6 +30,13 @@ FuriStreamBuffer* furi_stream_buffer_alloc(size_t size, size_t trigger_level) {
     const size_t buffer_size = size + 1;
 
     FuriStreamBuffer* stream_buffer = calloc(1, sizeof(FuriStreamBuffer) + buffer_size);
+    // On a no-PSRAM board a large buffer (e.g. the SubGHz worker's ~16 KB) can
+    // fail to allocate when the heap is tight. Fail here with a clear OOM naming
+    // the real call site + size, instead of passing a NULL static buffer into
+    // xStreamBufferCreateStatic() and tripping the cryptic FreeRTOS
+    // configASSERT(pxStaticStreamBuffer) at stream_buffer.c:424 -> reboot.
+    furi_check(stream_buffer, "furi_stream_buffer_alloc OOM");
+
     StreamBufferHandle_t hStreamBuffer = xStreamBufferCreateStatic(
         buffer_size, trigger_level, stream_buffer->buffer, &stream_buffer->container);
 
