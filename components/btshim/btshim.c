@@ -547,9 +547,30 @@ static void bt_handle_get_settings(Bt* bt, BtMessage* message) {
     *message->data.settings = bt->bt_settings;
 }
 
+/* Defined below; declared here so the settings toggle can bring the radio stack
+ * up/down on the enabled transition (see bt_handle_set_settings). */
+static void bt_handle_stop_stack(Bt* bt);
+static void bt_handle_start_stack(Bt* bt);
+
 static void bt_handle_set_settings(Bt* bt, BtMessage* message) {
+    const bool was_enabled = bt->bt_settings.enabled;
     bt->bt_settings = *message->data.csettings;
-    bt_apply_settings(bt);
+    const bool now_enabled = bt->bt_settings.enabled;
+
+    if(now_enabled && !was_enabled) {
+        /* Off -> On: on no-PSRAM boards the BLE controller + Bluedroid host and
+         * the serial GATT profile are deferred at boot, so this toggle is where
+         * they actually start. Just calling start_advertising is not enough --
+         * there is no profile registered yet. bt_handle_start_stack brings up
+         * the radio stack, registers the serial profile, then advertises. */
+        bt_handle_start_stack(bt);
+    } else if(!now_enabled && was_enabled) {
+        /* On -> Off: tear the stack down to reclaim the ~64 KB it holds. */
+        bt_handle_stop_stack(bt);
+    } else {
+        /* No enabled-state change: just (re)apply advertising state. */
+        bt_apply_settings(bt);
+    }
     bt_settings_save(&bt->bt_settings);
 }
 
