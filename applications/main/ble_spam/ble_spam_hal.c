@@ -78,8 +78,8 @@ bool ble_spam_hal_start(void) {
     if(free_internal < BLE_SPAM_MIN_FREE_INTERNAL) {
         ESP_LOGE(
             TAG,
-            "Not enough RAM for BLE spam: %zu free, need >= %u",
-            free_internal,
+            "Not enough RAM for BLE spam: %u free, need >= %u",
+            (unsigned)free_internal,
             (unsigned)BLE_SPAM_MIN_FREE_INTERNAL);
         return false;
     }

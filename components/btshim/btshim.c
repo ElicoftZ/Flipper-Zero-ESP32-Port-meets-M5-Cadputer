@@ -632,6 +632,20 @@ static void bt_handle_stop_stack(Bt* bt) {
 static void bt_handle_start_stack(Bt* bt) {
     FURI_LOG_I(TAG, "Starting BLE stack...");
 
+    /* Only bring the stack up if Bluetooth is actually enabled. On this no-PSRAM
+     * board BT is off by default and the serial stack is not running at the
+     * desktop. Apps that borrow the radio (BLE Spam/Walk) call bt_stop_stack on
+     * entry and bt_start_stack on exit -- if BT was off, "restoring" it here
+     * would start a stack that was never up AND fail: bringing up the controller
+     * + Bluedroid needs ~64 KB, but the app + its BLE UUID DB leave only ~45 KB,
+     * so the init OOMs and aborts inside ESP-IDF (BTU_StartUp / controller reset).
+     * Skip it -- bt_set_settings starts the stack when the user enables BT. */
+    if(!bt->bt_settings.enabled) {
+        FURI_LOG_I(TAG, "BT disabled, leaving stack down");
+        bt->status = BtStatusOff;
+        return;
+    }
+
     if(furi_hal_bt_start_radio_stack()) {
         bt_start_application(bt);
         if(bt->bt_settings.enabled) {

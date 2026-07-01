@@ -247,8 +247,8 @@ bool ble_walk_hal_start(void) {
     if(free_internal < BLE_WALK_MIN_FREE_INTERNAL) {
         ESP_LOGE(
             TAG,
-            "Not enough RAM for BLE walk: %zu free, need >= %u",
-            free_internal,
+            "Not enough RAM for BLE walk: %u free, need >= %u",
+            (unsigned)free_internal,
             (unsigned)BLE_WALK_MIN_FREE_INTERNAL);
         return false;
     }
