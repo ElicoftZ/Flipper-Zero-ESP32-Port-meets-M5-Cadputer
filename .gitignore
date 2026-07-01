@@ -39,3 +39,6 @@ managed_components/
 releases/*.zip
 *-backup-*
 *.backup-*
+
+# Merged flashable images (reproducible from build_<board>/ via esptool merge_bin)
+*-merged.bin
