@@ -66,10 +66,26 @@ static void bt_settings_toggle_callback(VariableItem* item) {
     furi_assert(app);
 
     const uint8_t index = variable_item_get_current_value_index(item);
-    app->settings.enabled = (index == 1);
+
+    if(index == 1) {
+        /* Bluetooth is disabled on this build. The BLE controller + Bluedroid
+         * stack (~64 KB) plus an active mobile RPC connection exceed the RAM
+         * available on this no-PSRAM board, which crashes the device. Rather
+         * than let it crash, refuse to enable and tell the user. Snap the toggle
+         * back to OFF and keep the stack down. */
+        variable_item_set_current_value_index(item, 0);
+        variable_item_set_current_value_text(item, bt_setting_text[0]);
+        app->settings.enabled = false;
+        bt_set_settings(app->bt, &app->settings);
+        bt_settings_show_result(
+            app, "Unavailable", "Bluetooth is disabled\non this device\n(known memory bug)");
+        FURI_LOG_W(TAG, "Bluetooth enable refused: unavailable (no-PSRAM memory limit)");
+        return;
+    }
+
+    app->settings.enabled = false;
     variable_item_set_current_value_text(item, bt_setting_text[index]);
     bt_set_settings(app->bt, &app->settings);
-
     FURI_LOG_I(TAG, "Bluetooth toggled: enabled=%d", app->settings.enabled);
 }
 

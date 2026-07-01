@@ -463,10 +463,14 @@ static bool nfc_is_hal_ready(void) {
         // No connection to the chip, show an error screen
         DialogsApp* dialogs = furi_record_open(RECORD_DIALOGS);
         DialogMessage* message = dialog_message_alloc();
-        dialog_message_set_header(message, "Error: NFC Chip Failed", 64, 0, AlignCenter, AlignTop);
+        dialog_message_set_header(message, "NFC Not Available", 64, 8, AlignCenter, AlignTop);
         dialog_message_set_text(
-            message, "Send error photo via\nsupport.flipper.net", 0, 63, AlignLeft, AlignBottom);
-        //dialog_message_set_icon(message, &I_err_09, 128 - 25, 64 - 25);
+            message,
+            "No NFC module detected.\nConnect an M5Unit NFC/RFID2\nmodule to the Grove port.",
+            64,
+            34,
+            AlignCenter,
+            AlignCenter);
         dialog_message_show(dialogs, message);
         dialog_message_free(message);
         furi_record_close(RECORD_DIALOGS);

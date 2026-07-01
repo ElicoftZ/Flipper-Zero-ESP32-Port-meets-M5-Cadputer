@@ -427,6 +427,28 @@ void subghz_free(SubGhz* subghz, bool alloc_for_tx_only) {
 }
 
 int32_t subghz_app(void* p) {
+    /* No CC1101 radio detected at boot (e.g. no external SubGHz module on this
+     * board): show a clear "not available" message and exit, instead of opening
+     * an app that cannot work and would allocate the ~16 KB capture buffer. */
+    if(!furi_hal_subghz_is_connected()) {
+        FURI_LOG_W(TAG, "SubGHz: no CC1101 detected, aborting app launch");
+        DialogsApp* dialogs = furi_record_open(RECORD_DIALOGS);
+        DialogMessage* message = dialog_message_alloc();
+        dialog_message_set_header(message, "Sub-GHz Not Available", 64, 8, AlignCenter, AlignTop);
+        dialog_message_set_text(
+            message,
+            "No CC1101 radio detected.\nConnect a SubGHz module.",
+            64,
+            34,
+            AlignCenter,
+            AlignCenter);
+        dialog_message_set_buttons(message, NULL, NULL, "OK");
+        dialog_message_show(dialogs, message);
+        dialog_message_free(message);
+        furi_record_close(RECORD_DIALOGS);
+        return 0;
+    }
+
     bool alloc_for_tx;
     if(p && strlen(p)) {
         alloc_for_tx = true;

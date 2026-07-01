@@ -479,6 +479,10 @@ void furi_hal_subghz_init(void) {
     furi_hal_subghz.state = FuriHalSubGhzStateIdle;
 }
 
+bool furi_hal_subghz_is_connected(void) {
+    return furi_hal_subghz.connected;
+}
+
 void furi_hal_subghz_sleep(void) {
     if(furi_hal_subghz.state == FuriHalSubGhzStateInit) furi_hal_subghz_init();
 

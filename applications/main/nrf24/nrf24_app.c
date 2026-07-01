@@ -1,4 +1,5 @@
 #include "nrf24_app.h"
+#include "nrf24_hw.h"
 #include "helpers/nrf24_jam_config.h"
 #include "helpers/nrf24_channel_source.h"
 #include <stdlib.h>
@@ -133,6 +134,34 @@ int32_t nrf24_app(void* args) {
     UNUSED(args);
 
     Nrf24App* app = nrf24_app_alloc();
+
+    /* Probe the NRF24 up front and show a clear "not available" message instead
+     * of opening a menu whose every action silently fails. Consistent with the
+     * SubGHz/NFC apps. The probe is self-contained (init/acquire/probe/clean up);
+     * the mode scenes re-init the radio themselves when the module is present. */
+    nrf24_hw_init();
+    nrf24_hw_acquire();
+    bool nrf24_present = nrf24_hw_probe();
+    nrf24_hw_release();
+    nrf24_hw_deinit();
+
+    if(!nrf24_present) {
+        FURI_LOG_W("Nrf24", "NRF24 not detected, aborting app launch");
+        DialogMessage* message = dialog_message_alloc();
+        dialog_message_set_header(message, "NRF24 Not Available", 64, 8, AlignCenter, AlignTop);
+        dialog_message_set_text(
+            message,
+            "No NRF24 module detected\non the SPI bus.",
+            64,
+            34,
+            AlignCenter,
+            AlignCenter);
+        dialog_message_set_buttons(message, NULL, NULL, "OK");
+        dialog_message_show(app->dialogs, message);
+        dialog_message_free(message);
+        nrf24_app_free(app);
+        return 0;
+    }
 
     scene_manager_next_scene(app->scene_manager, Nrf24AppSceneMenu);
     view_dispatcher_run(app->view_dispatcher);
