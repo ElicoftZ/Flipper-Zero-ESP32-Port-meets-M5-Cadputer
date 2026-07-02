@@ -132,7 +132,11 @@ struct BleSerial {
 /* ---- Global state ---- */
 static struct {
     SemaphoreHandle_t mutex;
+    /* ready_sem / unreg_sem are created once and never deleted: they are
+     * signaled from the Bluedroid task, so deleting them on a timeout path
+     * leaves a late event giving a dead handle (crash in xSemaphoreGive). */
     SemaphoreHandle_t ready_sem;  /* signaled when GATT service is started */
+    SemaphoreHandle_t unreg_sem;  /* signaled on ESP_GATTS_UNREG_EVT */
     bool initialized;
     bool gap_registered;
     bool gatts_registered;
@@ -625,6 +629,7 @@ static void serial_gatts_event_handler(
 
     case ESP_GATTS_START_EVT:
         ESP_LOGI(TAG, "gatts: service started, status=%d", param->start.status);
+        if(!serial) break; /* instance torn down mid-setup: gatts_if is gone */
         if(!serial_state.service_started) {
             /* Serial service just started — now create DIS */
             serial_lock_global();
@@ -672,12 +677,15 @@ static void serial_gatts_event_handler(
 
     case ESP_GATTS_WRITE_EVT:
         if(!serial) break;
-        ESP_LOGI(TAG, "gatts: WRITE handle=%d len=%d need_rsp=%d is_prep=%d",
+        /* LOGD, not LOGI: this fires per packet on the Bluedroid task; INFO
+         * logging through the console stalls the whole BLE event loop during
+         * discovery and RPC bursts. */
+        ESP_LOGD(TAG, "gatts: WRITE handle=%d len=%d need_rsp=%d is_prep=%d",
             param->write.handle, param->write.len,
             param->write.need_rsp, param->write.is_prep);
         if(param->write.handle == serial->handle_table[IDX_RX_VAL]) {
             /* RX data received from client */
-            ESP_LOGI(TAG, "  -> RX data %d bytes", param->write.len);
+            ESP_LOGD(TAG, "  -> RX data %d bytes", param->write.len);
             SerialServiceEventCallback cb = NULL;
             void* ctx = NULL;
             serial_lock(serial);
@@ -786,21 +794,21 @@ static void serial_gatts_event_handler(
 
     case ESP_GATTS_READ_EVT:
         if(!serial) break;
-        ESP_LOGI(TAG, "gatts: READ handle=%d", param->read.handle);
+        ESP_LOGD(TAG, "gatts: READ handle=%d", param->read.handle);
         if(param->read.handle == serial->handle_table[IDX_TX_VAL]) {
-            ESP_LOGI(TAG, "  -> TX val read");
+            ESP_LOGD(TAG, "  -> TX val read");
             esp_gatt_rsp_t rsp = {0};
             rsp.attr_value.len = 0;
             esp_ble_gatts_send_response(gatts_if, param->read.conn_id,
                 param->read.trans_id, ESP_GATT_OK, &rsp);
         } else if(param->read.handle == serial->handle_table[IDX_RX_VAL]) {
-            ESP_LOGI(TAG, "  -> RX val read");
+            ESP_LOGD(TAG, "  -> RX val read");
             esp_gatt_rsp_t rsp = {0};
             rsp.attr_value.len = 0;
             esp_ble_gatts_send_response(gatts_if, param->read.conn_id,
                 param->read.trans_id, ESP_GATT_OK, &rsp);
         } else {
-            ESP_LOGI(TAG, "  -> auto-rsp handle %d", param->read.handle);
+            ESP_LOGD(TAG, "  -> auto-rsp handle %d", param->read.handle);
         }
         break;
 
@@ -840,6 +848,14 @@ static void serial_gatts_event_handler(
         if(param->rsp.status != ESP_GATT_OK) {
             ESP_LOGE(TAG, "gatts: response failed, handle=%d status=%d",
                 param->rsp.handle, param->rsp.status);
+        }
+        break;
+
+    case ESP_GATTS_UNREG_EVT:
+        /* Last event for this gatts_if — lets ble_serial_free know it is now
+         * safe to free the instance. */
+        if(serial_state.unreg_sem) {
+            xSemaphoreGive(serial_state.unreg_sem);
         }
         break;
 
@@ -1071,8 +1087,16 @@ BleSerial* ble_serial_alloc(const BleSerialConfig* config) {
     }
     ESP_LOGI(TAG, "alloc: adv configured, adv_data_pending=%d", serial_state.adv_data_pending);
 
-    /* Create semaphore to wait for GATT service to be fully started */
-    serial_state.ready_sem = xSemaphoreCreateBinary();
+    /* Semaphore to wait for GATT service start. Created once, NEVER deleted:
+     * on the timeout path below, a late ESP_GATTS_START_EVT on the Bluedroid
+     * task would otherwise give a deleted handle and crash. Drain any stale
+     * give from a previous timed-out attempt instead. */
+    if(!serial_state.ready_sem) {
+        serial_state.ready_sem = xSemaphoreCreateBinary();
+    }
+    if(serial_state.ready_sem) {
+        xSemaphoreTake(serial_state.ready_sem, 0);
+    }
 
     ESP_LOGI(TAG, "alloc: registering GATTS app (async)");
     /* Register GATTS app — triggers async chain:
@@ -1082,8 +1106,6 @@ BleSerial* ble_serial_alloc(const BleSerialConfig* config) {
     err = esp_ble_gatts_app_register(BLE_SERIAL_APP_ID);
     if(err != ESP_OK) {
         ESP_LOGE(TAG, "GATTS app register failed: %s", esp_err_to_name(err));
-        vSemaphoreDelete(serial_state.ready_sem);
-        serial_state.ready_sem = NULL;
         goto error;
     }
 
@@ -1092,16 +1114,12 @@ BleSerial* ble_serial_alloc(const BleSerialConfig* config) {
 
     /* Wait for GATT service to be fully started (up to 5 seconds) */
     ESP_LOGI(TAG, "alloc: waiting for GATT service start...");
-    if(xSemaphoreTake(serial_state.ready_sem, pdMS_TO_TICKS(5000)) != pdTRUE) {
+    if(!serial_state.ready_sem ||
+       xSemaphoreTake(serial_state.ready_sem, pdMS_TO_TICKS(5000)) != pdTRUE) {
         ESP_LOGE(TAG, "Timeout waiting for GATT service start! app_reg=%d svc_started=%d",
             serial_state.app_registered, serial_state.service_started);
-        vSemaphoreDelete(serial_state.ready_sem);
-        serial_state.ready_sem = NULL;
         goto error;
     }
-
-    vSemaphoreDelete(serial_state.ready_sem);
-    serial_state.ready_sem = NULL;
 
     ESP_LOGI(TAG, "Serial service ready, adv_data_pending=%d rand_addr_pending=%d",
         serial_state.adv_data_pending, serial_state.rand_addr_pending);
@@ -1129,8 +1147,22 @@ void ble_serial_free(BleSerial* serial) {
     serial_unlock_global();
 
     if(serial_state.app_registered) {
+        /* Unregister is async: the Bluedroid task may still be dispatching
+         * events that captured this instance pointer at handler entry. Wait
+         * for ESP_GATTS_UNREG_EVT (the last event for this gatts_if) before
+         * freeing, or the phone disconnecting mid-teardown is a use-after-free. */
+        if(!serial_state.unreg_sem) {
+            serial_state.unreg_sem = xSemaphoreCreateBinary();
+        }
+        if(serial_state.unreg_sem) {
+            xSemaphoreTake(serial_state.unreg_sem, 0); /* drain stale give */
+        }
         esp_ble_gatts_app_unregister(serial->gatts_if);
         serial_state.app_registered = false;
+        if(serial_state.unreg_sem &&
+           xSemaphoreTake(serial_state.unreg_sem, pdMS_TO_TICKS(1000)) != pdTRUE) {
+            ESP_LOGW(TAG, "GATTS unregister confirm timed out");
+        }
     }
 
     if(serial->mutex) vSemaphoreDelete(serial->mutex);

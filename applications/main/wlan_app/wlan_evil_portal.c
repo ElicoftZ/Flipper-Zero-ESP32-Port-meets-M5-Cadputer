@@ -29,20 +29,28 @@ static volatile bool s_dns_run = false;
 
 // DNS forward cache. iOS bursts 30-60 queries in seconds when CNA closes;
 // the serial-forward path drops most under that load (recvfrom timeouts).
-// Caching cuts upstream traffic ~70% in steady state because iOS repeats
-// queries (often 2-3x per domain across A/AAAA/HTTPS). Cap TTL to keep
-// fresh-enough answers; size 32 entries handles a typical iOS burst.
-#define DNS_CACHE_SIZE 32
+// Caching cuts upstream traffic because iOS repeats queries (often 2-3x per
+// domain across A/AAAA/HTTPS). Cap TTL to keep fresh-enough answers.
+//
+// Sized for a no-PSRAM board (Cardputer-ADV): EXT_RAM_BSS_ATTR falls back to
+// internal .bss with no PSRAM, so this array is permanently resident SRAM that
+// the BLE stack and lwIP buffers compete for. 8 entries × ~344 B = ~2.7 KB
+// (was 32 × 632 B = ~20 KB). Field sizes cover real captive-portal traffic:
+//   - domain[64]: every CNA check host (captive.apple.com, connectivitycheck.
+//     gstatic.com, ...) is < 40 chars; longer names just miss the cache.
+//   - resp[256]: hijack answers are ~48 B and typical A/AAAA responses fit;
+//     responses > 256 B are simply not cached (still forwarded — see the
+//     size guard in dns_cache_insert), never truncated.
+// A miss is only a lost optimization: the query still forwards upstream.
+#define DNS_CACHE_SIZE 8
 #define DNS_CACHE_TTL_MS 30000
 typedef struct {
-    char domain[96];
+    char domain[64];
     uint16_t qtype;
     uint64_t expiry_ms;
     int resp_len;
-    uint8_t resp[512];
+    uint8_t resp[256];
 } DnsCacheEntry;
-// Live in PSRAM (~20KB) so we don't eat internal-RAM heap that the DNS task,
-// httpd sockets, and lwIP buffers compete for.
 static EXT_RAM_BSS_ATTR DnsCacheEntry s_dns_cache[DNS_CACHE_SIZE];
 static int s_dns_cache_next = 0;
 

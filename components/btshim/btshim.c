@@ -245,11 +245,17 @@ static uint16_t bt_serial_event_callback(SerialServiceEvent event, void* context
         if(sent != event.data.size) {
             BT_LOG_E("RX overflow: %zu/%u bytes buffered", sent, event.data.size);
         }
-        /* Wake the feeder thread */
-        furi_thread_flags_set(furi_thread_get_id(bt->rx_thread), BT_RX_EVENT_DATA);
+        /* Wake the feeder thread. Snapshot the pointer: this callback runs on
+         * the GATTS task while bt_close_rpc_connection (BtSrv thread) frees
+         * rx_thread, so a packet landing mid-disconnect would deref NULL. */
+        FuriThread* rx_thread = bt->rx_thread;
+        if(rx_thread) {
+            furi_thread_flags_set(furi_thread_get_id(rx_thread), BT_RX_EVENT_DATA);
+        }
         ret = furi_stream_buffer_spaces_available(bt->rx_stream);
     } else if(event.event == SerialServiceEventTypeDataSent) {
-        BT_LOG_I("TX confirmed");
+        /* Per-chunk on the Bluedroid task — keep off the console at INFO */
+        BT_LOG_D("TX confirmed");
         furi_event_flag_set(bt->rpc_event, BT_RPC_EVENT_BUFF_SENT);
     } else if(event.event == SerialServiceEventTypesBleResetRequest) {
         FURI_LOG_I(TAG, "BLE restart request received");
@@ -379,6 +385,10 @@ static void bt_close_rpc_connection(Bt* bt) {
         ble_profile_serial_set_rpc_active(
             bt->current_profile, FuriHalBtSerialRpcStatusNotActive);
         furi_event_flag_set(bt->rpc_event, BT_RPC_EVENT_DISCONNECTED);
+        /* Deregister the GATTS event callback BEFORE freeing the RX thread:
+         * a packet arriving in between would wake a thread that no longer
+         * exists (bt_serial_event_callback reads bt->rx_thread). */
+        ble_profile_serial_set_event_callback(bt->current_profile, 0, NULL, NULL);
         /* Stop RX feeder thread */
         if(bt->rx_thread) {
             furi_thread_flags_set(furi_thread_get_id(bt->rx_thread), BT_RX_EVENT_STOP);
@@ -387,7 +397,6 @@ static void bt_close_rpc_connection(Bt* bt) {
             bt->rx_thread = NULL;
         }
         rpc_session_close(bt->rpc_session);
-        ble_profile_serial_set_event_callback(bt->current_profile, 0, NULL, NULL);
         bt->rpc_session = NULL;
     }
 }
@@ -423,8 +432,9 @@ static bool bt_on_gap_event_callback(GapEvent event, void* context) {
         bt->pin = event.data.pin_code;
         BtMessage message = {
             .type = BtMessageTypePinCodeShow, .data.pin_code = event.data.pin_code};
-        furi_check(
-            furi_message_queue_put(bt->message_queue, &message, FuriWaitForever) == FuriStatusOk);
+        if(furi_message_queue_put(bt->message_queue, &message, 100) != FuriStatusOk) {
+            BT_LOG_E("BtSrv queue full, pin code popup dropped");
+        }
         ret = true;
     } else if(event.type == GapEventTypeUpdateMTU) {
         bt->max_packet_size = event.data.max_packet_size;
@@ -440,9 +450,15 @@ static bool bt_on_gap_event_callback(GapEvent event, void* context) {
     }
 
     if(do_update_status) {
+        /* This callback runs on the Bluedroid BTC task. BtSrv's stop-stack path
+         * blocks inside esp_bluedroid_disable() waiting for that same task, so a
+         * blocking put here (queue full while BtSrv is tearing down) deadlocks
+         * both threads until the task watchdog reboots the device. Drop the
+         * status refresh instead — the next event posts a fresh one. */
         BtMessage message = {.type = BtMessageTypeUpdateStatus};
-        furi_check(
-            furi_message_queue_put(bt->message_queue, &message, FuriWaitForever) == FuriStatusOk);
+        if(furi_message_queue_put(bt->message_queue, &message, 0) != FuriStatusOk) {
+            BT_LOG_W("BtSrv queue full, status update dropped");
+        }
     }
     return ret;
 }

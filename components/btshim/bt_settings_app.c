@@ -67,25 +67,19 @@ static void bt_settings_toggle_callback(VariableItem* item) {
 
     const uint8_t index = variable_item_get_current_value_index(item);
 
-    if(index == 1) {
-        /* Bluetooth is disabled on this build. The BLE controller + Bluedroid
-         * stack (~64 KB) plus an active mobile RPC connection exceed the RAM
-         * available on this no-PSRAM board, which crashes the device. Rather
-         * than let it crash, refuse to enable and tell the user. Snap the toggle
-         * back to OFF and keep the stack down. */
-        variable_item_set_current_value_index(item, 0);
-        variable_item_set_current_value_text(item, bt_setting_text[0]);
-        app->settings.enabled = false;
-        bt_set_settings(app->bt, &app->settings);
-        bt_settings_show_result(
-            app, "Unavailable", "Bluetooth is disabled\non this device\n(known memory bug)");
-        FURI_LOG_W(TAG, "Bluetooth enable refused: unavailable (no-PSRAM memory limit)");
-        return;
-    }
-
-    app->settings.enabled = false;
+    /* TESTING BRANCH (ble-testing): the Phase-5 gate that refused to enable BT
+     * on this no-PSRAM board is lifted so the hardened BLE path (BTU stack bump,
+     * btshim/ble_serial thread-safety fixes) can be exercised on hardware.
+     * The RAM ceiling is unchanged — enabling BT here brings up the controller +
+     * Bluedroid (~64 KB); expect it to be tight and possibly OOM under an active
+     * RPC connection. Do NOT merge this toggle change to master as-is. */
+    app->settings.enabled = (index == 1);
     variable_item_set_current_value_text(item, bt_setting_text[index]);
     bt_set_settings(app->bt, &app->settings);
+    if(app->settings.enabled) {
+        bt_settings_show_result(
+            app, "Enabling BLE", "Memory is tight on\nthis board — may be\nunstable (test build)");
+    }
     FURI_LOG_I(TAG, "Bluetooth toggled: enabled=%d", app->settings.enabled);
 }
 

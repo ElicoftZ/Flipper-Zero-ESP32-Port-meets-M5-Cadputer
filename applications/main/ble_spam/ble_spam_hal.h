@@ -3,6 +3,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/** True if there is enough free internal RAM to bring up the BLE controller +
+ *  Bluedroid for spam/walk. On a no-PSRAM board the app's own UI + UUID DB can
+ *  leave less than this, in which case ble_spam_hal_start() would fail; callers
+ *  should check this at launch and refuse gracefully instead of retry-looping. */
+bool ble_spam_hal_have_ram(void);
+
 /** Stop btshim, init BLE controller + Bluedroid for raw advertising.
  *  @return true on success */
 bool ble_spam_hal_start(void);

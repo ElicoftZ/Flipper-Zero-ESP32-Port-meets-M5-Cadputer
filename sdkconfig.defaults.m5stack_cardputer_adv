@@ -93,9 +93,12 @@ CONFIG_BT_GATT_MAX_SR_ATTRIBUTES=20
 # GATTC characteristic cache: trim from default 40, only need a few
 # for BLE serial. Saves ~360 bytes.
 CONFIG_BT_GATTC_MAX_CACHE_CHAR=10
-# BTU task stack: 3072 bytes instead of upstream default 4352.
-# Saves 1280 bytes; BTU only handles HCI/GATT events, not deep stacks.
-CONFIG_BT_BTU_TASK_STACK_SIZE=3072
+# BTU task stack: 4096 (trimmed upstream default is 4352). An earlier 3072
+# experiment overflowed during first connect: BTU serves the phone's GATT
+# discovery WHILE SMP pairing runs (we request encryption at connect), and
+# with canary-only overflow checking that corrupts the heap → lockup instead
+# of a clean panic.
+CONFIG_BT_BTU_TASK_STACK_SIZE=4096
 # BTC (Bluetooth core) task stack: keep at 3072.
 # 2560 causes overflow during BLE stack toggle in ble_spam.
 CONFIG_BT_BTC_TASK_STACK_SIZE=3072

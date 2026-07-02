@@ -1,5 +1,7 @@
 #include "ble_spam_app.h"
 #include "ble_uuid_db.h"
+#include "ble_spam_hal.h"
+#include <dialogs/dialogs.h>
 #include "views/ble_spam_view.h"
 #include "views/ble_walk_scan_view.h"
 #include "views/ble_walk_detail_view.h"
@@ -28,7 +30,11 @@ static void ble_spam_tick_event_callback(void* context) {
 }
 
 static BleSpamApp* ble_spam_app_alloc(void) {
+    /* On this ESP32 port malloc() returns NULL on OOM (mainline Flipper aborts),
+     * so bail cleanly here instead of NULL-dereferencing on the next line when
+     * the heap floor is too low to open this (view-heavy) app. */
     BleSpamApp* app = malloc(sizeof(BleSpamApp));
+    if(!app) return NULL;
 
     app->gui = furi_record_open(RECORD_GUI);
 
@@ -143,6 +149,39 @@ int32_t ble_spam_app(void* args) {
     UNUSED(args);
     ble_uuid_db_init();
     BleSpamApp* app = ble_spam_app_alloc();
+    if(!app) {
+        FURI_LOG_E("BleSpam", "Out of memory: cannot open BLE Spam");
+        ble_uuid_db_deinit();
+        return -1;
+    }
+
+    /* The BLE controller + Bluedroid need ~72 KB free internal RAM. On this
+     * no-PSRAM board the app's own UI + UUID DB leave only ~59 KB, so every mode
+     * would fail ble_spam_hal_start(). The mode scenes handle that failure by
+     * calling scene_manager_previous_scene() from within on_enter(), which
+     * re-enters + re-fires the HAL start ~4x/s and starves the GUI into a
+     * ViewPort lockup (the "crash"). Refuse up front with a clear message
+     * instead — consistent with the BT/SubGHz/NFC "not available" gating. */
+    if(!ble_spam_hal_have_ram()) {
+        FURI_LOG_W("BleSpam", "Not enough RAM for BLE radio; refusing launch");
+        DialogsApp* dialogs = furi_record_open(RECORD_DIALOGS);
+        DialogMessage* message = dialog_message_alloc();
+        dialog_message_set_header(message, "BLE Spam Unavailable", 64, 8, AlignCenter, AlignTop);
+        dialog_message_set_text(
+            message,
+            "Not enough free RAM to\nstart the BLE radio on\nthis board (no PSRAM).",
+            64,
+            34,
+            AlignCenter,
+            AlignCenter);
+        dialog_message_set_buttons(message, NULL, NULL, "OK");
+        dialog_message_show(dialogs, message);
+        dialog_message_free(message);
+        furi_record_close(RECORD_DIALOGS);
+        ble_spam_app_free(app);
+        ble_uuid_db_deinit();
+        return 0;
+    }
 
     scene_manager_next_scene(app->scene_manager, BleSpamSceneMain);
     view_dispatcher_run(app->view_dispatcher);

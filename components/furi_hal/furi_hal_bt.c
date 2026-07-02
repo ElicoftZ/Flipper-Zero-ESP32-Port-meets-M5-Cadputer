@@ -242,7 +242,10 @@ void furi_hal_bt_set_key_storage_change_callback(
 #include <esp_bt_main.h>
 #include <furi_hal_random.h>
 
-static GapExtraBeaconState s_beacon_state = GapExtraBeaconStateStopped;
+/* volatile: written from the Bluedroid GAP callback task, polled in the
+ * busy-wait loops in gap_extra_beacon_start/stop — without it the compiler
+ * may hoist the read and the loop never sees the update. */
+static volatile GapExtraBeaconState s_beacon_state = GapExtraBeaconStateStopped;
 static GapExtraBeaconConfig s_beacon_config;
 static uint8_t s_beacon_data[EXTRA_BEACON_MAX_DATA_SIZE];
 static uint8_t s_beacon_data_len;

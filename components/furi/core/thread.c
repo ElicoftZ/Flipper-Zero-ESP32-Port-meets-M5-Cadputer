@@ -310,6 +310,12 @@ void furi_thread_set_stack_size(FuriThread* thread, size_t stack_size) {
     if(!thread->stack_buffer) {
         thread->stack_buffer = heap_caps_malloc(stack_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     }
+    /* Out of memory for the stack: fail with a clear, logged panic instead of
+     * leaving stack_buffer NULL. furi_thread_start would otherwise hand
+     * xTaskCreateStatic a NULL stack and fault cryptically inside the loader's
+     * app-start path — the "crashes the loader" symptom when a heavy app (e.g.
+     * BLE Spam, 8 KB stack) is launched on a tight heap. */
+    furi_check(thread->stack_buffer, "Out of memory: thread stack allocation failed");
     thread->stack_size = stack_size;
 }
 

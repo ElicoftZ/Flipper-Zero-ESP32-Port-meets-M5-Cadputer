@@ -61,6 +61,14 @@ static void spam_gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_
     }
 }
 
+bool ble_spam_hal_have_ram(void) {
+    /* Same threshold ble_spam_hal_start enforces. With BT off (the default on
+     * this board) the serial stack is already down, so this reading matches
+     * what start() would see after bt_stop_stack. Lets the app refuse at launch
+     * instead of entering the mode scenes and retry-looping on start() failure. */
+    return heap_caps_get_free_size(MALLOC_CAP_INTERNAL) >= BLE_SPAM_MIN_FREE_INTERNAL;
+}
+
 bool ble_spam_hal_start(void) {
     ESP_LOGI(TAG, "Starting BLE spam HAL...");
 
