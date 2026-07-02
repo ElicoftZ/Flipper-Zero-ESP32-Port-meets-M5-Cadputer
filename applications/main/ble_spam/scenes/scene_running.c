@@ -244,5 +244,8 @@ void ble_spam_scene_running_on_exit(void* context) {
         }
     }
 
-    ble_spam_hal_stop();
+    // Stop advertising but KEEP the controller up, so returning here for another
+    // attack reuses it (no leak-prone init/deinit cycle). Full teardown happens
+    // in scene_main on_enter when the user leaves the spam section entirely.
+    ble_spam_hal_stop_adv();
 }

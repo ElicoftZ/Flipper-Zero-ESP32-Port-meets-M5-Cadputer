@@ -1,4 +1,5 @@
 #include "../ble_spam_app.h"
+#include "../ble_spam_hal.h"
 
 enum MainMenuIndex {
     MainMenuIndexBleSpam,
@@ -15,6 +16,12 @@ static void main_menu_callback(void* context, uint32_t index) {
 
 void ble_spam_scene_main_on_enter(void* context) {
     BleSpamApp* app = context;
+
+    // Returning to the main menu means the user left the spam section: fully
+    // tear the controller down here (idempotent — no-op on first entry or if it
+    // was never started). Keeping it up only while navigating spam<->running is
+    // what avoids the per-attack init/deinit leak.
+    ble_spam_hal_stop();
 
     submenu_add_item(app->submenu, "Spam", MainMenuIndexBleSpam, main_menu_callback, app);
     submenu_add_item(app->submenu, "Walk", MainMenuIndexBleWalk, main_menu_callback, app);

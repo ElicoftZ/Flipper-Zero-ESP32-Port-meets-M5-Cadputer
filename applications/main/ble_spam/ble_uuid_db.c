@@ -2,10 +2,21 @@
 
 #include <ctype.h>
 #include <esp_log.h>
+#include <esp_heap_caps.h>
 #include <furi.h>
 #include <storage/storage.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* The parsed SD maps cost ~30 KB of internal heap (services 151 + members 256 +
+ * descriptors 18, each a 57-byte user_entry_t, rounded up by realloc doubling).
+ * On a no-PSRAM board that RAM is exactly what the BLE controller (~72 KB) needs
+ * to come up for spam/walk, and the two cannot coexist in ~85 KB free. When
+ * internal RAM is below this, skip the SD load and fall back to the built-in
+ * SIG tables (flash, free): spam never looks up names so it just works, and
+ * walk/tracker still resolve the common UUIDs. A board with plenty of internal
+ * RAM (PSRAM parts) clears this and loads the full custom database. */
+#define BLE_UUID_DB_MIN_FREE (110 * 1024)
 
 #define TAG "BleUuidDb"
 
@@ -270,6 +281,15 @@ cleanup:
 void ble_uuid_db_init(void) {
     if(s_initialized) return;
     s_initialized = true;
+
+    size_t freeh = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    if(freeh < BLE_UUID_DB_MIN_FREE) {
+        ESP_LOGW(
+            TAG,
+            "Low RAM (%u free): skipping SD UUID maps, using built-in SIG tables",
+            (unsigned)freeh);
+        return;
+    }
 
     load_file(BLE_UUID_DB_DIR "/services.txt", &s_services);
     load_file(BLE_UUID_DB_DIR "/chars.txt", &s_chars);

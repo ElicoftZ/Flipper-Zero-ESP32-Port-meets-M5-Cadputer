@@ -12,18 +12,30 @@
 
 /* Minimum free internal heap required to bring up the BLE controller +
  * Bluedroid host for spam. Below this, esp_bluedroid_enable()'s internal
- * BTU_StartUp runs out of RAM and asserts (vQueueDelete on a NULL queue in the
- * failed-init rollback) instead of returning an error -- crashing the whole
- * device. On this no-PSRAM board (~200 KB total) the app + BLE UUID database
- * already consume most of the heap, so we check up front and fail gracefully
- * (the caller backs out to the menu) rather than reboot-looping. */
-#define BLE_SPAM_MIN_FREE_INTERNAL (72 * 1024)
+ * BTU_StartUp runs out of RAM and asserts instead of returning an error.
+ *
+ * Measured (cardputer_adv, serial capture 2026-07-02): a running controller
+ * consumes only ~36 KB (free goes 74 KB -> 37.7 KB at "HAL ready"), and the
+ * FIRST Bluedroid init on a boot costs a one-time ~13 KB of persistent globals
+ * that deinit does not reclaim (so the first teardown lands at ~60 KB, not 74).
+ * The old 72 KB threshold was ~2x the real need, which meant that after the
+ * first spam session the ~60 KB left could never clear the gate again until a
+ * reboot. 54 KB sits above the ~36 KB steady cost with headroom for the init
+ * transient, yet below the ~60 KB post-session floor so subsequent sessions
+ * still start. */
+#define BLE_SPAM_MIN_FREE_INTERNAL (54 * 1024)
 
 #define TAG "BleSpamHal"
 
 static volatile bool s_adv_configured = false;
 static volatile bool s_advertising = false;
 static volatile bool s_rand_addr_pending = false;
+/* The BLE controller + Bluedroid deinit leaks ~13-20 KB per init/deinit cycle
+ * on this no-PSRAM IDF build, so cycling it per spam attack quickly drops below
+ * the 72 KB start threshold and the next start fails. Keep the stack up across
+ * attacks: start() is idempotent, the running scene only stops *advertising*
+ * on exit, and full teardown happens once when leaving the spam section. */
+static bool s_hal_started = false;
 
 static esp_ble_adv_params_t s_adv_params = {
     .adv_int_min = 0x20,               // 20ms
@@ -62,14 +74,28 @@ static void spam_gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_
 }
 
 bool ble_spam_hal_have_ram(void) {
-    /* Same threshold ble_spam_hal_start enforces. With BT off (the default on
-     * this board) the serial stack is already down, so this reading matches
-     * what start() would see after bt_stop_stack. Lets the app refuse at launch
-     * instead of entering the mode scenes and retry-looping on start() failure. */
+    /* If the btshim serial stack is currently up (Bluetooth enabled in
+     * Settings), it is holding ~64 KB right now — but ble_spam_hal_start()
+     * stops it first and reclaims that RAM before it needs it. So don't refuse
+     * at the launch gate just because free looks low; there will be plenty once
+     * the serial stack is swapped out. The phone's serial link drops while
+     * spamming and is restored on exit (ble_spam_hal_stop -> bt_start_stack).
+     * The strict free check only applies when BT is already off (stack down,
+     * nothing to reclaim) — this is what start() itself sees after bt_stop_stack. */
+    if(esp_bt_controller_get_status() != ESP_BT_CONTROLLER_STATUS_IDLE) {
+        return true;
+    }
     return heap_caps_get_free_size(MALLOC_CAP_INTERNAL) >= BLE_SPAM_MIN_FREE_INTERNAL;
 }
 
 bool ble_spam_hal_start(void) {
+    // Already up from a previous attack in this session: reuse it. This is what
+    // keeps repeated attacks from cycling (and leaking) the controller.
+    if(s_hal_started) {
+        ESP_LOGI(TAG, "BLE spam HAL already started, reusing");
+        return true;
+    }
+
     ESP_LOGI(TAG, "Starting BLE spam HAL...");
 
     // Stop btshim BLE stack
@@ -145,11 +171,16 @@ bool ble_spam_hal_start(void) {
     // BLE_ADDR_TYPE_RANDOM without falling back to an invalid zero address.
     ble_spam_hal_set_random_addr();
 
+    s_hal_started = true;
     ESP_LOGI(TAG, "BLE spam HAL ready");
     return true;
 }
 
 void ble_spam_hal_stop(void) {
+    if(!s_hal_started) {
+        return; // nothing to tear down (idempotent — safe from scene_main on_enter)
+    }
+    s_hal_started = false;
     ESP_LOGI(TAG, "Stopping BLE spam HAL...");
 
     // Stop advertising

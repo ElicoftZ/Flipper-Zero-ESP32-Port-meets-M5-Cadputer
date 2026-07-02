@@ -186,6 +186,9 @@ int32_t ble_spam_app(void* args) {
     scene_manager_next_scene(app->scene_manager, BleSpamSceneMain);
     view_dispatcher_run(app->view_dispatcher);
 
+    // Safety net: tear down the radio if the app exits with it still up
+    // (idempotent — scene_main on_enter normally does this first).
+    ble_spam_hal_stop();
     ble_spam_app_free(app);
     ble_uuid_db_deinit();
     return 0;

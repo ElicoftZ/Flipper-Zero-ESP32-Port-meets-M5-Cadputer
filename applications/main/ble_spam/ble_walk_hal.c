@@ -11,9 +11,15 @@
 #include <btshim.h>
 #include <string.h>
 
-/* See ble_spam_hal.c: bringing up Bluedroid needs ~64 KB internal RAM or it
- * asserts mid-init and crashes the device. Fail gracefully below this. */
-#define BLE_WALK_MIN_FREE_INTERNAL (72 * 1024)
+/* See ble_spam_hal.c for the measured reality: a running controller costs only
+ * ~36 KB and the first-boot Bluedroid init costs a one-time ~13 KB, so after any
+ * BLE session the floor is ~60 KB. The old 72 KB gate could never clear that
+ * floor again, so walk/tracker/race were permanently "not enough RAM" once spam
+ * (or a prior walk) had run. Match spam's 54 KB. Walk also runs a GATT *client*
+ * (discovery allocates more than spam's advertising), so the "HAL ready
+ * free=..." log is left in to confirm walk keeps enough runtime headroom; raise
+ * this if discovery is seen to OOM. */
+#define BLE_WALK_MIN_FREE_INTERNAL (54 * 1024)
 
 #define TAG "BleWalkHal"
 #define WALK_GATTC_APP_ID 0
